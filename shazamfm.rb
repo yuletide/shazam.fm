@@ -1,5 +1,7 @@
-require 'lastfm'
+require 'nokogiri'
 require 'capybara/poltergeist'
+require 'lastfm'
+require 'json'
 
 SCROBBLE_THRESHOLD_DAYS = 1
 scrobbled = [1,2,3,{a:1,b:2}]
