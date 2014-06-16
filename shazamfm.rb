@@ -3,7 +3,7 @@ require 'capybara/poltergeist'
 require 'lastfm'
 require 'json'
 
-SCROBBLE_THRESHOLD_DAYS = 1
+SCROBBLE_THRESHOLD_DAYS = 14
 $scrobbled = []
 SCROBBLES_FILE="scrobbles.json"
 SESSION_FILE="session.txt"
@@ -39,7 +39,11 @@ def save_session(session)
   file.close
   puts "wrote session to file"
 end
- 
+
+def clear_session
+  puts "clearing session"
+  File.delete(SESSION_FILE)
+end
 
 def load_session
   if File.exists?(SESSION_FILE)
@@ -50,10 +54,12 @@ def load_session
     end
   else
     puts "no session file"
+    return nil
   end
 end
 
 def scrobbled? song
+  #puts "checking #{song}"
   $scrobbled.each do |scr|
     if scr["timestamp"] == song[:timestamp] and scr["title"] == song[:title]
       puts "already scrobbled!"
@@ -66,7 +72,7 @@ end
 
 def scrape
   @songs = []
-  
+
   session = Capybara::Session.new(:poltergeist)
   session.visit "http://www.facebook.com"
   sleep 2
@@ -82,6 +88,7 @@ def scrape
     session.find("#pass").set(ENV['FACEBOOK_PASS'])
     session.find("input[value='Log In']").click
   end
+  sleep 2
   session.visit "http://www.shazam.com/myshazam"
   sleep 2
   parsed = Nokogiri::HTML(session.html)
@@ -101,30 +108,39 @@ def scrape
 end
 
 def scrobble(songs)
-  if songs.length
+  #puts "Scrobbling #{songs}"
+  unless songs.empty?
     load_scrobbled
-    
+
     now = DateTime.now()
     @session = load_session
-    lastfm = Lastfm.new(ENV['LASTFM_KEY'], ENV['LASTFM_SECRET'])
-    if @session.nil? or @session.empty?
-      token = lastfm.auth.get_token
-      puts "Time to authorize! Please visit: http://www.last.fm/api/auth/?api_key=#{ENV['LASTFM_KEY']}&token=#{token} then press return"
-      gets.chomp
-      lastfm.session = lastfm.auth.get_session(token: token)['key']
-      save_session(lastfm.session)
-    else
-      lastfm.session = @session
-    end
 
-    songs.each do |song|
-      if now - song[:datetime] < SCROBBLE_THRESHOLD_DAYS
-        unless scrobbled? song
-          puts "ok to scrobble #{song[:title]}"
-          lastfm.track.scrobble(artist: song[:artist], track: song[:title])
-          $scrobbled.push(song)
+    begin
+      lastfm = Lastfm.new(ENV['LASTFM_KEY'], ENV['LASTFM_SECRET'])
+      if @session.nil? or @session.empty?
+        token = lastfm.auth.get_token
+        puts "Time to authorize! Please visit: http://www.last.fm/api/auth/?api_key=#{ENV['LASTFM_KEY']}&token=#{token} then press return"
+        gets.chomp
+        lastfm.session = lastfm.auth.get_session(token: token)['key']
+        save_session(lastfm.session)
+      else
+        lastfm.session = @session
+      end
+
+      songs.each do |song|
+        if now - song[:datetime] < SCROBBLE_THRESHOLD_DAYS
+          unless scrobbled? song
+            puts "ok to scrobble #{song[:title]}"
+            lastfm.track.scrobble(artist: song[:artist], track: song[:title])
+            $scrobbled.push(song)
+          end
+        else
+          puts "too old #{song}"
         end
       end
+    rescue Lastfm::ApiError
+      clear_session
+      scrobble(songs)
     end
   end
   write_scrobbled
